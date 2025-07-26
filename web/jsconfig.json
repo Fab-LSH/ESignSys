@@ -1,4 +1,5 @@
 {
+  // Removed $schema property to avoid schema loading issues
   "compilerOptions": {
     "baseUrl": "./",
     "paths": {

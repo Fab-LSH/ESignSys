@@ -164,8 +164,8 @@ def apply_seal():
         y = float(seal_config.get('y', 0))
         seal_id = str(seal_config.get('sealId'))
 
-        # 印章图片路径（假设印章图片已上传到指定目录，文件名为 sealId.png）
-        seal_img_path = os.path.join(current_app.config['UPLOAD_FOLDER'], f"{seal_id}.png")
+        # 印章图片路径
+        seal_img_path = os.path.join(current_app.config['SEALS_FOLDER'], f"{seal_id}.png")
         if not os.path.exists(seal_img_path):
             return jsonify({'error': '印章图片不存在'}), 400
 
@@ -266,41 +266,47 @@ def rename_file():
     except Exception as e:
         return jsonify({'error': f'文件重命名失败: {str(e)}'}), 500
 
-@files_bp.route('/download/<file_id>')
+@files_bp.route('/download/<file_id>', methods=['GET'])
 def download_file(file_id):
-    """下载文件接口"""
-    try:
-        # 在所有文件夹中查找文件
-        folders = [
-            current_app.config['UPLOAD_FOLDER'],
-            current_app.config['PROCESSED_FOLDER']
-        ]
-        
-        file_path = None
-        filename = None
-        
-        for folder in folders:
-            if os.path.exists(folder):
-                for file in os.listdir(folder):
-                    if file.startswith(file_id) or file_id in file:
-                        file_path = os.path.join(folder, file)
-                        filename = file
-                        break
-                if file_path:
+    """
+    下载文件（支持签章后文件按合同编号-签约对方简称-合同名称.pdf命名查找）
+    """
+    # 优先查找签章后文件（命名规则：合同编号-签约对方简称-合同名称.pdf）
+    contract_number = request.args.get('contractNumber')
+    counterparty = request.args.get('counterparty')
+    contract_name = request.args.get('contractName')
+
+    processed_folder = current_app.config['PROCESSED_FOLDER']
+    upload_folder = current_app.config['UPLOAD_FOLDER']
+
+    file_path = None
+
+    # 如果有合同参数，则按命名规则查找
+    if contract_number and counterparty and contract_name:
+        filename = f"{contract_number}-{counterparty}-{contract_name}.pdf"
+        candidate = os.path.join(processed_folder, filename)
+        if os.path.exists(candidate):
+            file_path = candidate
+
+    # 否则按 file_id 查找（兼容老逻辑）
+    if not file_path:
+        # 先查 processed 文件夹
+        for filename in os.listdir(processed_folder):
+            if file_id in filename:
+                file_path = os.path.join(processed_folder, filename)
+                break
+        # 再查 upload 文件夹
+        if not file_path:
+            for filename in os.listdir(upload_folder):
+                if file_id in filename:
+                    file_path = os.path.join(upload_folder, filename)
                     break
+
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({'error': '文件不存在'}), 404
+
+    return send_file(file_path, as_attachment=True)
         
-        if not file_path or not os.path.exists(file_path):
-            return jsonify({'error': '文件不存在'}), 404
-        
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='application/pdf'
-        )
-        
-    except Exception as e:
-        return jsonify({'error': f'文件下载失败: {str(e)}'}), 500
 
 @files_bp.route('/preview/<file_id>')
 def preview_file(file_id):
@@ -454,4 +460,58 @@ def list_files():
         
     except Exception as e:
         return jsonify({'error': f'获取文件列表失败: {str(e)}'}), 500
+
+@files_bp.route('/ai-seal-position', methods=['POST'])
+def ai_seal_position():
+    """
+    合并后文件，AI识别推荐盖章位置
+    """
+    data = request.get_json()
+    file_id = data.get('fileId')
+    # 查找PDF路径
+    pdf_path = None
+    for folder in [current_app.config['PROCESSED_FOLDER'], current_app.config['UPLOAD_FOLDER']]:
+        for filename in os.listdir(folder):
+            if file_id in filename:
+                pdf_path = os.path.join(folder, filename)
+                break
+        if pdf_path:
+            break
+    if not pdf_path or not os.path.exists(pdf_path):
+        return jsonify({'success': False, 'message': 'PDF文件不存在'}), 404
+
+    # 1. OCR识别PDF文本（如用 paddleocr、百度OCR、pytesseract）
+    # 2. 调用智谱模型（如GLM-4）分析文本，返回推荐盖章位置
+    # 3. 结合PDF坐标，返回 page, x, y
+
+    # 示例伪代码
+    from paddleocr import PaddleOCR
+    ocr = PaddleOCR(use_angle_cls=True, lang='ch')
+    result = ocr.ocr(pdf_path, cls=True)
+    # 提取所有文本块
+    text_blocks = []
+    for page_idx, page in enumerate(result):
+        for line in page:
+            txt = line[1][0]
+            box = line[0]
+            text_blocks.append({'page': page_idx+1, 'text': txt, 'box': box})
+
+    # 拼接所有文本，发送给智谱模型
+    import requests
+    glm_api_url = 'https://open.bigmodel.cn/api/ai_engine/v1/invoke'
+    prompt = "请帮我识别合同落款或签字盖章区域，返回推荐盖章的页码和坐标（x,y），格式为：{'page':页码,'x':x坐标,'y':y坐标}。请严格按照上述格式返回，若无法识别请返回位置文本块如下：" + str(text_blocks)
+    glm_payload = {
+        "model": "glm-4-flash",
+        "prompt": prompt,
+        "temperature": 0.2,
+        "top_p": 0.8
+    }
+    glm_res = requests.post(glm_api_url, json=glm_payload, headers={"Authorization": "Bearer YOUR_API_KEY"})
+    glm_data = glm_res.json()
+    # 假设返回 {'page': 2, 'x': 200, 'y': 350}
+    position = glm_data.get('data', {}).get('position', None)
+    if position:
+        return jsonify({'success': True, 'position': position})
+    else:
+        return jsonify({'success': False, 'message': 'AI未识别到盖章位置'})
 

@@ -15,8 +15,8 @@ function FileProcessing() {
     mainContract: null,
     attachments: []
   })
-  const [mergedFile, setMergedFile] = useState(null)
   const [signedFile, setSignedFile] = useState(null)
+  const [mergedFile, setMergedFile] = useState(null)
   const [contractInfo, setContractInfo] = useState({
     contractNumber: '',
     signDate: new Date().toISOString().split('T')[0],
@@ -131,7 +131,7 @@ function FileProcessing() {
     setUploadProgress(0)
 
     try {
-      // 1. 发送合并请求到后端
+      // 合并文件
       const res = await fetch('/api/files/merge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -140,15 +140,27 @@ function FileProcessing() {
           attachmentIds: files.attachments.map(file => file.id),
         }),
       })
-
       if (!res.ok) throw new Error('合并失败')
       const data = await res.json()
-
-      // 2. 处理后端返回的合并文件信息
       if (data.success && data.mergedFile) {
         setMergedFile(data.mergedFile)
+        setMessage('合并成功，正在识别盖章位置...')
+        // 合并成功后，调用AI识别接口
+        // const aiRes = await fetch('/api/files/ai-seal-position', {
+        //   method: 'POST',
+        //   headers: { 'Content-Type': 'application/json' },
+        //   body: JSON.stringify({ fileId: data.mergedFile.id }),
+        // })
+        // const aiData = await aiRes.json()
+        // // aiData: { page, x, y }
+        // if (aiData.success && aiData.position) {
+        //   setSealPosition(aiData.position)
+        //   setCurrentStep(3)
+        //   setMessage('AI已识别盖章位置，请确认或拖动微调')
+        // } else {
         setCurrentStep(3)
-        setMessage('合并成功')
+        //   setMessage('AI未识别到盖章位置，请手动设置')
+        // }
       } else {
         setMessage(data.error || '合并失败')
       }
@@ -158,6 +170,8 @@ function FileProcessing() {
       setIsProcessing(false)
     }
   }
+
+
 
   const handleApplySignature = async () => {
     if (!mergedFile || !selectedSeal) return
@@ -276,7 +290,7 @@ function FileProcessing() {
 
   const steps = [
     { id: 1, title: '上传文件', description: '上传主合同和附件' },
-    { id: 2, title: '合并文档', description: '将文件合并为一个PDF' },
+    { id: 2, title: '合并预览', description: '将文件合并预览' },
     { id: 3, title: '加盖签章', description: '选择印章并设置位置' },
     { id: 4, title: '完成下载', description: '生成最终文件' }
   ]
@@ -409,7 +423,7 @@ function FileProcessing() {
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
                 <Merge className="h-5 w-5" />
-                <span>2. 文档合并</span>
+                <span>2. 合并预览</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -419,7 +433,7 @@ function FileProcessing() {
                 className="w-full"
               >
                 <Merge className="h-4 w-4 mr-2" />
-                合并文档
+                合并预览
               </Button>
               
               {isProcessing && currentStep === 2 && (
@@ -573,7 +587,7 @@ function FileProcessing() {
                   <p className="text-sm text-blue-700 mt-1">{generateFileName()}</p>
                 </div>
                 
-                <Button onClick={handleDownloadSigned} className="w-full">
+                <Button onClick={handleDownloadFinal} className="w-full">
                   <Download className="h-4 w-4 mr-2" />
                   下载签章后文件
                 </Button>

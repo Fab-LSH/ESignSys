@@ -6,21 +6,20 @@ from datetime import datetime
 
 seals_bp = Blueprint('seals', __name__)
 
-# 简单的文件存储，实际项目中应使用数据库
-SEALS_FILE = os.path.join(os.path.dirname(__file__), '..', 'seals', 'seals.json')
+# 简单的印章存储
 SEALS_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'seals')
 
 def load_seals():
     """加载印章数据"""
-    if os.path.exists(SEALS_FILE):
-        with open(SEALS_FILE, 'r', encoding='utf-8') as f:
+    if os.path.exists(SEALS_FOLDER):
+        with open(SEALS_FOLDER, 'r', encoding='utf-8') as f:
             return json.load(f)
     return []
 
 def save_seals(seals):
     """保存印章数据"""
-    os.makedirs(os.path.dirname(SEALS_FILE), exist_ok=True)
-    with open(SEALS_FILE, 'w', encoding='utf-8') as f:
+    os.makedirs(os.path.dirname(SEALS_FOLDER), exist_ok=True)
+    with open(SEALS_FOLDER, 'w', encoding='utf-8') as f:
         json.dump(seals, f, ensure_ascii=False, indent=2)
 
 def save_seal_image(seal_id, image_file):
